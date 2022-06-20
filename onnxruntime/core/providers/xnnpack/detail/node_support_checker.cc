@@ -12,17 +12,20 @@
 #include "core/providers/common.h"
 #include "core/providers/cpu/nn/pool_attributes.h"
 #include "core/providers/xnnpack/detail/utils.h"
+#include "core/providers/shared/node_unit/node_unit.h"
 
 // each operator provides a helper to check if supported
 #include "core/providers/xnnpack/nn/conv.h"
 #include "core/providers/xnnpack/nn/max_pool.h"
+#include "core/providers/xnnpack/nn/average_pool.h"
+#include "core/providers/xnnpack/nn/softmax.h"
 
 namespace onnxruntime {
 namespace xnnpack {
 
 namespace {
 // function to check if a node is supported. kernel must have been matched previously to check type constraints.
-using CheckerFn = std::function<bool(const Node& node,
+using CheckerFn = std::function<bool(const NodeUnit& node,
                                      const GraphViewer& graph)>;
 
 // function to check if we can fuse a node with a previously selected one.
@@ -35,6 +38,7 @@ const Node* ClipReluChecker(const Node& node,
                             const GraphViewer& graph,
                             const std::unordered_set<const Node*>& supported_nodes) {
   const Node* fuse_with{nullptr};
+  static const std::unordered_set<std::string> node_to_be_fuse = {"Conv", "MaxPool", "AveragePool"};
 
   do {
     // input 0 must come from a node we support
@@ -47,7 +51,7 @@ const Node* ClipReluChecker(const Node& node,
     const Node& input0 = input0_edge->GetNode();
     if (supported_nodes.count(&input0) == 0 ||
         input0.Domain() != kMSInternalNHWCDomain ||
-        (input0.OpType() != "Conv" && input0.OpType() != "MaxPool")) {
+        (node_to_be_fuse.count(input0.OpType()) == 0)) {
       break;
     }
 
@@ -79,10 +83,14 @@ const Node* ClipReluChecker(const Node& node,
 
 }  // namespace
 
-bool NodeSupportChecker::IsNodeSupported(const Node& node) {
+bool NodeSupportChecker::IsNodeSupported(const NodeUnit& nodeunit) {
+  auto& node = nodeunit.GetNode();
   static std::unordered_map<std::string, CheckerFn> checkers{
-      {"Conv", Conv::IsOnnxNodeSupported},
-      {"MaxPool", MaxPool::IsOnnxNodeSupported},
+      {"Conv", Conv::IsConvOnnxNodeSupported},
+      {"QLinearConv", Conv::IsConvOnnxNodeSupported},
+      {"MaxPool", MaxPool::IsMaxPoolOnnxNodeSupported},
+      {"AveragePool", AveragePool::IsAveragePoolOnnxNodeSupported},
+      {"Softmax", Softmax::IsSoftmaxOnnxNodeSupported},
   };
 
   bool supported = false;
@@ -90,7 +98,7 @@ bool NodeSupportChecker::IsNodeSupported(const Node& node) {
   if (node.Domain() == onnxruntime::kOnnxDomain) {
     const auto entry = checkers.find(node.OpType());
     if (entry != checkers.cend()) {
-      supported = entry->second(node, graph_);
+      supported = entry->second(nodeunit, graph_);
     }
   }
 
@@ -104,7 +112,7 @@ const Node* NodeSupportChecker::IsNodeSupportedWithFusion(const Node& node) {
   };
 
   const Node* fuse_with{nullptr};
-
+  // it should be fine to check the target node only.
   if (node.Domain() == onnxruntime::kOnnxDomain) {
     const auto entry = checkers.find(node.OpType());
     if (entry != checkers.cend()) {
