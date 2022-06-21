@@ -180,6 +180,17 @@ ORT_API_STATUS_IMPL(OrtApis::EvalStep, _Inout_ OrtTrainingSession* sess, _In_opt
   API_IMPL_END
 }
 
+ORT_API_STATUS_IMPL(OrtApis::SetLearningRate, _Inout_ OrtTrainingSession* sess,
+                    _In_ float learning_rate) {
+  API_IMPL_BEGIN
+
+  auto session = reinterpret_cast<onnxruntime::training::api::TrainingSession*>(sess);
+  ORT_API_RETURN_IF_STATUS_NOT_OK(session->SetLearningRate(learning_rate));
+
+  return nullptr;
+  API_IMPL_END
+}
+
 ORT_API_STATUS_IMPL(OrtApis::OptimizerStep, _Inout_ OrtTrainingSession* sess,
                     _In_opt_ const OrtRunOptions* run_options) {
   API_IMPL_BEGIN
@@ -190,6 +201,29 @@ ORT_API_STATUS_IMPL(OrtApis::OptimizerStep, _Inout_ OrtTrainingSession* sess,
   } else {
     ORT_API_RETURN_IF_STATUS_NOT_OK(session->OptimizerStep(*run_options));
   }
+
+  return nullptr;
+  API_IMPL_END
+}
+
+ORT_API_STATUS_IMPL(OrtApis::RegisterLinearLRScheduler, _Inout_ OrtTrainingSession* sess,
+                    _In_ int64_t warmup_step_count, _In_ int64_t total_step_count) {
+  API_IMPL_BEGIN
+
+  auto session = reinterpret_cast<onnxruntime::training::api::TrainingSession*>(sess);
+  ORT_API_RETURN_IF_STATUS_NOT_OK(session->RegisterScheduler([warmup_step_count, total_step_count](auto optimizer) {
+    return std::make_unique<onnxruntime::training::api::LinearLRScheduler>(optimizer, warmup_step_count, total_step_count);
+  }));
+
+  return nullptr;
+  API_IMPL_END
+}
+
+ORT_API_STATUS_IMPL(OrtApis::SchedulerStep, _Inout_ OrtTrainingSession* sess) {
+  API_IMPL_BEGIN
+
+  auto session = reinterpret_cast<onnxruntime::training::api::TrainingSession*>(sess);
+  ORT_API_RETURN_IF_STATUS_NOT_OK(session->SchedulerStep());
 
   return nullptr;
   API_IMPL_END
