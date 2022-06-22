@@ -1252,12 +1252,15 @@ function(onnxruntime_configure_target target_name)
   #  set_target_properties(${target_name} PROPERTIES VS_USER_PROPS ${PROJECT_SOURCE_DIR}/EnableVisualStudioCodeAnalysis.props)
   #endif()
   target_include_directories(${target_name} PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${ONNXRUNTIME_ROOT} ${abseil_cpp_SOURCE_DIR})
+  if (onnxruntime_ENABLE_TRAINING_ON_DEVICE)
+    target_include_directories(${target_name} PRIVATE ${ORTTRAINING_ROOT})
+  endif()
   if (onnxruntime_ENABLE_LTO)
     set_target_properties(${target_name} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     set_target_properties(${target_name} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
     set_target_properties(${target_name} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL TRUE)
   endif()
-  
+
   # Keep BinSkim happy
   if(MSVC AND NOT onnxruntime_target_platform MATCHES "ARM")
     target_link_options(${target_name} PRIVATE "/CETCOMPAT")

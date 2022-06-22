@@ -3429,7 +3429,7 @@ struct OrtApi {
 
 #ifdef ENABLE_TRAINING_ON_DEVICE
   // defines c apis for on device training scenarios
-  #include "../../../orttraining/orttraining/training_api/include/onnxruntime_training_c_api.h"
+  #include "orttraining/training_api/include/onnxruntime_training_c_api.h"
 #endif
 };
 
