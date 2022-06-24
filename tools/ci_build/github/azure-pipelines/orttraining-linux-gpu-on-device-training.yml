@@ -37,8 +37,7 @@ jobs:
         --volume $(Build.BinariesDirectory):/build \
         onnxruntime_ondevicetraining_tests_image \
           /build/RelWithDebInfo/launch_test.py \
-            --cmd_line_with_args "python orttraining_on_device_training_tests.py" \
-            --cwd /build/RelWithDebInfo \
+            --cwd /build/RelWithDebInfo --cmd_line_with_args "python orttraining_on_device_training_tests.py" \
     displayName: 'Run On-Device Training Tests'
     condition: succeededOrFailed()
     timeoutInMinutes: 120
