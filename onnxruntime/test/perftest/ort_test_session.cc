@@ -6,7 +6,6 @@
 #include <assert.h>
 #include "providers.h"
 #include "TestCase.h"
-// #include "test/common/tensor_op_test_utils.h"
 
 #ifdef _WIN32
 #define strdup _strdup
@@ -554,7 +553,6 @@ select from 'TF8', 'TF16', 'UINT8', 'FLOAT', 'ITENSOR'. \n)");
 void OnnxRuntimeTestSession::InitializeTensorWithSeed(int32_t seed, ONNXTensorElementDataType type,
                                                       void* data_ptr, const std::vector<int64_t>& input_node_dim) {
   if (seed < 0) return;
-  // test::RandomValueGenerator random{seed};
   std::default_random_engine engin;
   engin.seed(seed);
   int64_t total_elem = 1;
@@ -563,11 +561,9 @@ void OnnxRuntimeTestSession::InitializeTensorWithSeed(int32_t seed, ONNXTensorEl
   }
   switch (type) {
     case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT: {
-      // std::vector<float> inputs = random.Uniform<float>(input_node_dim, -5, 5);
       const std::uniform_real_distribution<float>::param_type p(0, static_cast<float>(5));
       std::uniform_real_distribution<float> dist;
       auto* ptr = reinterpret_cast<float*>(data_ptr);
-      // std::memcpy(ptr, inputs.data(), inputs.size()*sizeof(float));
       for (int i = 0; i < total_elem; ++i) {
         ptr[i] = dist(engin, p);
       }
