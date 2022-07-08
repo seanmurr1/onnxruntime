@@ -151,7 +151,7 @@ OpComputeType ParseQuantParamAndConType(const OpKernelInfo& info, QuantParam& qu
   if (x_dtype == ONNX_NAMESPACE::TensorProto_DataType_INT8) {
     // The rules of per-channel quantization is that:
     // X-tensor share the same scalar-scale and zp as per-tensor quantization
-    // while we have seperate quantization params for each conv kernel, 
+    // while we have separate quantization params for each conv kernel,
     // and there is total output-channels of kernels
     if (quant_param_.W_scale_tensor) {
       conv_type = OpComputeType::op_compute_type_qs8_per_channel;
