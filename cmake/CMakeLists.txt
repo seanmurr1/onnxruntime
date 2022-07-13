@@ -142,6 +142,7 @@ option(onnxruntime_FUZZ_TEST "Enable Fuzz testing" OFF)
 option(onnxruntime_ENABLE_NVTX_PROFILE "Enable NVTX profile." OFF)
 option(onnxruntime_ENABLE_MEMORY_PROFILE "Enable memory profile." OFF)
 option(onnxruntime_ENABLE_TRAINING "Enable training functionality." OFF)
+# For on-device training ort build, onnxruntime_ENABLE_TRAINING must be ON.
 option(onnxruntime_ENABLE_TRAINING_ON_DEVICE "Enable training on device." OFF)
 option(onnxruntime_ENABLE_TRAINING_OPS "Include training operators but no training session support." OFF)
 option(onnxruntime_ENABLE_TRAINING_TORCH_INTEROP "Enable training kernels interop with torch." OFF)
@@ -191,6 +192,12 @@ option(onnxruntime_ENABLE_ATEN "Enable ATen fallback" OFF)
 
 if (onnxruntime_USE_CUDA)
   set(onnxruntime_DISABLE_RTTI OFF)
+endif()
+
+if (onnxruntime_ENABLE_TRAINING_ON_DEVICE)
+  if (NOT onnxruntime_ENABLE_TRAINING)
+    message(FATAL_ERROR "To build for on-device training, the training build must be enabled (onnxruntime_ENABLE_TRAINING).")
+  endif()
 endif()
 
 if (APPLE)

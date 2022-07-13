@@ -30,9 +30,9 @@ struct TestRunnerParameters {
   std::string synthetic_input_type;
 
   // Data configs.
-  std::string train_data_dir;
-  std::string test_data_dir;
-  std::string output_dir;  // Output of training, e.g., trained model files.
+  PathString train_data_dir;
+  PathString test_data_dir;
+  PathString output_dir;  // Output of training, e.g., trained model files.
 
   // Training configs.
   int64_t train_batch_size;
@@ -127,9 +127,9 @@ bool ParseArguments(int argc, char* argv[], TestRunnerParameters& params) {
     EnforceCheck(params.gradient_accumulation_steps >= 1,
                  "Invalid gradient_accumulation_steps parameter: should be >= 1");
 
-    params.train_data_dir = flags["train_data_dir"].as<std::string>();
-    params.test_data_dir = flags["test_data_dir"].as<std::string>();
-    params.output_dir = flags["output_dir"].as<std::string>();
+    params.train_data_dir = ToPathString(flags["train_data_dir"].as<std::string>());
+    params.test_data_dir = ToPathString(flags["test_data_dir"].as<std::string>());
+    params.output_dir = ToPathString(flags["output_dir"].as<std::string>());
     if (params.output_dir.empty()) {
       printf("No output directory specified. Trained model files will not be saved.\n");
     }
@@ -175,7 +175,7 @@ void InitSyntheticDataLoader(
 
 int RunTraining(const TestRunnerParameters& params) {
   g_ort_api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
-  g_ort_training_api = OrtGetApiBase()->GetTrainingApi(ORT_API_VERSION);
+  g_ort_training_api = g_ort_api->GetTrainingApi(ORT_API_VERSION);
 
   // Create Env
   OrtEnv* env;
@@ -251,7 +251,7 @@ int RunTraining(const TestRunnerParameters& params) {
 
       std::vector<OrtValue*> fetches(train_mode_output_count);
       ORT_RETURN_ON_ERROR(g_ort_training_api->TrainStep(session, nullptr,
-                                                        inputs.size(), (const OrtValue* const*)inputs.data(),
+                                                        inputs.size(), inputs.data(),
                                                         train_mode_output_count, fetches.data()));
 #if defined(USE_CUDA) && defined(ENABLE_NVTX_PROFILE)
       train_step_range.End();
@@ -347,11 +347,6 @@ int RunTraining(const TestRunnerParameters& params) {
 }
 
 int main(int argc, char* argv[]) {
-  // setup logger, be noted: LOGS_DEFAULT must be after logging manager initialization.
-  // This is to mitigate the issue " Attempt to use DefaultLogger but none has been registered".
-  // Need understand why the public CreateEnv did not get default logger ready.
-  Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "e2e_test_runner");
-
   TestRunnerParameters params;
   EnforceCheck(ParseArguments(argc, argv, params), "Parse arguments failed.");
 

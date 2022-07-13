@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+#include "orttraining/core/framework/checkpoint_common.h"
 #include "core/common/logging/logging.h"
 #include "core/common/logging/sinks/clog_sink.h"
 #include "core/common/status.h"
@@ -24,9 +25,9 @@ namespace training {
 Status CreateOrtValuesFromTensorProtos(
     const std::vector<ONNX_NAMESPACE::TensorProto>& tensor_protos,
     NameMLValMap& name_to_ort_value) {
-  static CPUExecutionProviderInfo info;
-  static CPUExecutionProvider cpu_provider(info);
-  static AllocatorPtr cpu_allocator = cpu_provider.GetAllocator(0, OrtMemTypeDefault);
+  static const CPUExecutionProviderInfo info;
+  static const CPUExecutionProvider cpu_provider(info);
+  static const AllocatorPtr cpu_allocator = cpu_provider.GetAllocator(0, OrtMemTypeDefault);
 
   for (const auto& tensor_proto : tensor_protos) {
     TensorShape tensor_shape{utils::GetTensorShapeFromTensorProto(tensor_proto)};
