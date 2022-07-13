@@ -452,7 +452,12 @@ function run(config: Test.Config) {
     npmlog.info('TestRunnerCli.Run', '(5/5) Running karma to start test runner...');
     const karmaCommand = path.join(npmBin, 'karma');
     const webgpu = args.backends.indexOf('webgpu') > -1;
-    const browser = getBrowserNameFromEnv(args.env, args.debug, webgpu);
+    const browser = getBrowserNameFromEnv(
+        args.env,
+        args.bundleMode === 'perf' ? 'perf' :
+            args.debug             ? 'debug' :
+                                     'test',
+        webgpu);
     const karmaArgs = ['start', `--browsers ${browser}`];
     if (args.debug) {
       karmaArgs.push('--log-level info --timeout-mocha 9999999');
@@ -556,20 +561,11 @@ function saveConfig(config: Test.Config) {
   fs.writeJSONSync(path.join(TEST_ROOT, './testdata-config.json'), config);
 }
 
-function getBrowserNameFromEnv(env: TestRunnerCliArgs['env'], debug?: boolean, webgpu?: boolean) {
+
+function getBrowserNameFromEnv(env: TestRunnerCliArgs['env'], mode: 'debug'|'perf'|'test', webgpu: boolean) {
   switch (env) {
-    case 'chrome': {
-      let browserName = 'Chrome';
-      if (webgpu) {
-        browserName += 'Canary';
-      }
-      if (debug) {
-        browserName += 'Debug';
-      } else {
-        browserName += 'Test';
-      }
-      return browserName;
-    }
+    case 'chrome':
+      return selectChromeBrowser(mode, webgpu);
     case 'edge':
       return 'Edge';
     case 'firefox':
@@ -582,5 +578,21 @@ function getBrowserNameFromEnv(env: TestRunnerCliArgs['env'], debug?: boolean, w
       return process.env.ORT_WEB_TEST_BS_BROWSERS!;
     default:
       throw new Error(`env "${env}" not supported.`);
+  }
+}
+
+function selectChromeBrowser(mode: 'debug'|'perf'|'test', webgpu: boolean) {
+  let browserName = 'Chrome';
+  if (webgpu) {
+    browserName += 'Canary';
+  }
+
+  switch (mode) {
+    case 'debug':
+      return browserName + 'Debug';
+    case 'perf':
+      return browserName + 'Perf';
+    default:
+      return browserName + 'Test';
   }
 }
