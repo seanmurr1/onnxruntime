@@ -4694,6 +4694,9 @@ def test_ortmodule_attribute_name_collision_warning():
     with pytest.warns(UserWarning) as warning_record:
         ort_model = ORTModule(pt_model)
 
+    for warning in warning_record:
+        print(warning.message.args[0])
+
     assert len(warning_record) == 2
     assert "_torch_module collides with ORTModule's attribute name." in warning_record[0].message.args[0]
     assert "load_state_dict collides with ORTModule's attribute name." in warning_record[1].message.args[0]
