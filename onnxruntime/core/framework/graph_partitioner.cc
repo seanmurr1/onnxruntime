@@ -135,7 +135,8 @@ static Status GetCapabilityForEP(Graph& graph, KernelRegistryManager& kernel_reg
     // which are reconstructed to update domain or completely new nodes which are necessary for layout transformation.
     // we always give GetCapability the second call as long as capabilities is not empty. GetCapability have different
     // behaviors for first/second call, the first call only tag those nodes supported by this EP and then
-    // assigned by `AssignNodes`, the second call will do some node processing and node fusion whenever ops were layout-sensitive or not.
+    // assigned by `AssignNodes`, the second call will do some node processing and
+    // node fusion whenever ops were layout-sensitive or not.
     // So we are calling GetCapability twice here to make things simple and finish the following procedures;
     // 1. To process new nodes introduced by transform_layout function.
     // 2. To do Op-fusion and graph optimization

@@ -233,7 +233,7 @@ TEST(XnnpackEP, TestQDQAveragePool) {
 }
 // xnnpack only support the last dim as reduced axis,
 // we are expected that the other reduce axis would be handled by CPUEP
-TEST(XnnpackEP, TestQDQSoftMax_axisZero) {
+TEST(XnnpackEP, TestQDQSoftMax_axisZero_v13) {
   RunModelTest(BuildQDQSoftMaxTestCase<uint8_t, uint8_t>(
                       {1, 2, 3, 32} /* input_shape */,
                       static_cast<int64_t>(0) /* axis */,
@@ -243,8 +243,28 @@ TEST(XnnpackEP, TestQDQSoftMax_axisZero) {
                   {ExpectedEPNodeAssignment::None});
 }
 
+TEST(XnnpackEP, TestSoftMax_axisZero_v12) {
+  const std::vector<int64_t> input_shape = {1, 2, 3, 5};
+  int64_t axis = input_shape.size() - 1;
+  auto modelCreater = [input_shape, axis](ModelTestBuilder& builder) {
+    auto* input_arg = builder.MakeInput<float>(input_shape,
+                                               std::numeric_limits<float>::min(),
+                                               std::numeric_limits<float>::max());
+
+    auto* output_arg = builder.MakeOutput();
+
+    // add SoftMax
+    Node& softmax_node = builder.AddNode("Softmax", {input_arg}, {output_arg});
+    softmax_node.AddAttribute("axis", axis);
+    softmax_node.SetSinceVersion(12);
+  };
+  RunModelTest(modelCreater,
+               "xnnpack_test_graph_softmax",
+               {ExpectedEPNodeAssignment::All});
+}
+
 TEST(XnnpackEP, TestSoftMax_axisLast) {
-  const std::vector<int64_t> input_shape = {1, 2, 3, 32};
+  const std::vector<int64_t> input_shape = {1, 2, 3, 5};
   int64_t axis = input_shape.size() - 1;
   auto modelCreater = [input_shape, axis](ModelTestBuilder& builder) {
     auto* input_arg = builder.MakeInput<float>(input_shape,
@@ -264,7 +284,7 @@ TEST(XnnpackEP, TestSoftMax_axisLast) {
 
 TEST(XnnpackEP, TestQDQSoftMax_axisLast) {
   RunModelTest(BuildQDQSoftMaxTestCase<uint8_t, uint8_t>(
-                      {1, 2, 3, 32} /* input_shape */,
+                      {1, 2, 3, 5} /* input_shape */,
                       static_cast<int64_t>(3) /* axis */,
                       1.f / 256 /* output_scales */,
                       0 /* output_zp */),

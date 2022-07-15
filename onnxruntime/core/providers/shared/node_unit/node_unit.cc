@@ -154,8 +154,8 @@ NodeUnit::NodeUnit(const Node& node)
 
 NodeUnit::NodeUnit(const GraphViewer& graph_viewer, const QDQ::NodeGroup& node_group)
     : output_nodes_{GetQDQIONodes(graph_viewer, node_group, false /* is_input */)},
-      q_nodes_{GetQDQIONodes(graph_viewer, node_group, false /* is_input */)},
-      dq_nodes_{output_nodes_},
+      q_nodes_{output_nodes_},
+      dq_nodes_{GetQDQIONodes(graph_viewer, node_group, true /* is_input */)},
       target_node_(*graph_viewer.GetNode(node_group.target_node)),
       type_(Type::QDQGroup),
       inputs_{GetQDQIODefs(target_node_, node_group, true /* is_input */)},

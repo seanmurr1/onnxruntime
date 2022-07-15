@@ -188,7 +188,7 @@ std::vector<std::unique_ptr<ComputeCapability>> XnnpackExecutionProvider::GetCap
     // any node in NodeUnit will trigger IsNodeSupported, so we just check once.
     if (node_unit_supported_result.count(&node_unit)) {
       continue;
-    } else if (node.GetExecutionProviderType() == "") {
+    } else if (node_unit.GetNode().GetExecutionProviderType() == "") {
       // unassigned node.
       // check if this is an ONNX operator that we have an NHWC xnnpack kernel for.
       if (checker.IsNodeSupported(node_unit)) {
@@ -216,7 +216,7 @@ std::vector<std::unique_ptr<ComputeCapability>> XnnpackExecutionProvider::GetCap
           capability.sub_graph->use_existing_schema = true;
         }
       }
-    } else if (node.GetExecutionProviderType() == Type()) {
+    } else if (node_unit.GetNode().GetExecutionProviderType() == Type()) {
       // second call to GetCapability after layout changes.
       // as we requested the node in the first call, it should be supported in the second call.
       request_node = true;
