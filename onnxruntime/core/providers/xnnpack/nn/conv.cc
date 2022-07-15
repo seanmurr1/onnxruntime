@@ -290,6 +290,11 @@ static bool isValidQuantConv(const onnxruntime::NodeUnit& node_unit, const onnxr
   } while (false);
   return supported;
 }
+
+bool IsQuantizedConv(QuantizedOpType quant_op_type) {
+  return (quant_op_type == QuantizedOpType::QLinearConv) ||
+         (quant_op_type == QuantizedOpType::QDQConv);
+}
 }  // namespace
 
 // helper to check whether an ONNX Conv node is supported by the NHWC version
@@ -411,18 +416,17 @@ Conv::Conv(const OpKernelInfo& info) : OpKernel(info), conv_attrs_{info} {
 
   // as the weight input is a constant initializer we can calculate all the sizes here instead of in Compute
   const Tensor* W = nullptr;
-
-  if (X.TypeAsProto()->tensor_type().elem_type() == ONNX_NAMESPACE::TensorProto_DataType_FLOAT) {
-    ORT_ENFORCE(info.TryGetConstantInput(1, &W),
-                "Weight input was not constant initializer. XNNPACK EP should not have asked for the node. Node name:",
-                node.Name());
+  int weight_index = 1;
+  auto input_dtype = X.TypeAsProto()->tensor_type().elem_type();
+  if (input_dtype == ONNX_NAMESPACE::TensorProto_DataType_FLOAT) {
     conv_type_ = OpComputeType::op_compute_type_fp32;
   } else {
-    ORT_ENFORCE(info.TryGetConstantInput(3, &W),
-                "Weight input wasnot constant initializer. XNNPACK EP should not have asked for the node. Node name:",
-                node.Name());
-    conv_type_ = ParseQuantParamAndConType(info, quant_param_, X.TypeAsProto()->tensor_type().elem_type());
+    weight_index = 3;
+    conv_type_ = ParseQuantParamAndConType(info, quant_param_, input_dtype);
   }
+  ORT_ENFORCE(info.TryGetConstantInput(weight_index, &W),
+              "Weight input was not constant initializer. XNNPACK EP should not have asked for the node. Node name:",
+              node.Name());
   // 'M' is first dim of weight. Prepacking will alter the layout of W later
   M_ = W->Shape()[0];
 

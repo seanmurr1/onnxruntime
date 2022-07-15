@@ -64,7 +64,6 @@ struct QuantParam {
   float Y_scale_value = 0;
 };
 
-using Shape = std::vector<uint32_t>;
 enum class QuantizedOpType : uint8_t {
   QLinearConv,
   QLinearMaxPool,
@@ -96,31 +95,24 @@ bool IsPaddingTypeSupported(AutoPadType auto_pad);
 
 using XnnpackOperator = std::unique_ptr<struct xnn_operator, XnnpackOperatorDeleter>;
 
-std::unique_ptr<IndexedSubGraph::MetaDef> FuseActivation(const Node& conv, const Node& activation,
+std::unique_ptr<IndexedSubGraph::MetaDef> FuseActivation(const NodeUnit& conv_unit, const Node& activation,
                                                          const GraphViewer& graph);
 std::unique_ptr<IndexedSubGraph::MetaDef> FuseQDQGroup(const NodeUnit& unit_node);
 
 bool GetType(const NodeArg& node_arg, int32_t& type);
-bool GetShape(const NodeArg& node_arg, Shape& shape);
+bool GetShape(const NodeArg& node_arg, TensorShapeVector& shape);
 bool ParseQuantParamFromInfoByOrder(const OpKernelInfo& info,
                                     const InputTensorOrder& scale_zp_indexs,
                                     QuantParam& quant_param);
 
-bool IsQuantizedConv(QuantizedOpType quant_op_type);
-
-bool IsQuantizedMaxPool(QuantizedOpType quant_op_type);
-
-bool IsQuantizedAvgPool(QuantizedOpType quant_op_type);
-
-bool IsQuantizedSoftmax(QuantizedOpType quant_op_type);
 TensorQuantType GetTensorQuantType(const onnxruntime::NodeUnit& node_unit, int32_t io_index,
                                    bool is_output, const onnxruntime::GraphViewer& graph_viewer);
-const onnx::TensorProto* GetQuantizationScale(const InitializedTensorSet& initializers,
+/*const onnx::TensorProto* GetQuantizationScale(const InitializedTensorSet& initializers,
                                               const NodeUnitIODef& io_def);
 
 const onnx::TensorProto* GetQuantizationZeroPoint(const InitializedTensorSet& initializers,
                                                   const NodeUnitIODef& io_def);
-
+*/
 const char* TensorQtypeToString(enum TensorQuantType type);
 
 }  // namespace xnnpack

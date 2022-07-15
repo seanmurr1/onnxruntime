@@ -85,6 +85,12 @@ static bool IsQuantAvgPoolSupported(const NodeUnit& node_unit, const GraphViewer
 
   return supported;
 }
+
+bool IsQuantizedAvgPool(QuantizedOpType quant_op_type) {
+  return (quant_op_type == QuantizedOpType::QlinearAvgPool) ||
+         (quant_op_type == QuantizedOpType::QDQAvgPool);
+}
+
 }  // namespace
 
 bool AveragePool::IsAveragePoolOnnxNodeSupported(const onnxruntime::NodeUnit& node_unit,

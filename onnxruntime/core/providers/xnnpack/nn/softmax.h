@@ -20,6 +20,7 @@ class Softmax final : public OpKernel {
 
  private:
   int axis_;
+  int opset_;
   OpComputeType op_type_ = OpComputeType::op_compute_type_invalid;
   XnnpackOperator op0_;
   QuantParam quant_param_;

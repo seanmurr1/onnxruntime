@@ -9,16 +9,11 @@
 namespace onnxruntime {
 namespace xnnpack {
 
+namespace {
 bool IsQuantSoftmaxSupported(const onnxruntime::NodeUnit& node_unit, const onnxruntime::GraphViewer& graph) {
   bool supported = false;
   do {
     TensorQuantType x_input_type, output_type;
-    const auto& inputs = node_unit.Inputs();
-    // only one input for softmax
-    if (inputs.size() != 1) {
-      break;
-    }
-
     x_input_type = GetTensorQuantType(node_unit, 0, false, graph);
     output_type = GetTensorQuantType(node_unit, 0, true, graph);
     if (x_input_type != TensorTypeUint8 ||
@@ -30,6 +25,11 @@ bool IsQuantSoftmaxSupported(const onnxruntime::NodeUnit& node_unit, const onnxr
 
   return supported;
 }
+
+bool IsQuantizedSoftmax(QuantizedOpType quant_op_type) {
+  return (quant_op_type == QuantizedOpType::QDQSoftmax);
+}
+}  // namespace
 
 bool Softmax::IsSoftmaxOnnxNodeSupported(const onnxruntime::NodeUnit& node_unit,
                                          const onnxruntime::GraphViewer& graph) {
@@ -67,7 +67,7 @@ bool Softmax::IsSoftmaxOnnxNodeSupported(const onnxruntime::NodeUnit& node_unit,
     if (node_unit.SinceVersion() <= 12 && axis == -1) {
       axis = 1;  // default 1 for op-version less than 12
     }
-    if (axis != -1 && axis != x_shape->dim_size() - 1) {
+    if (axis != -1 && axis != x_shape->dim_size() - 1 && node_unit.SinceVersion() >= 13) {
       break;
     }
 
@@ -79,7 +79,7 @@ bool Softmax::IsSoftmaxOnnxNodeSupported(const onnxruntime::NodeUnit& node_unit,
 
 Softmax::Softmax(const OpKernelInfo& info) : OpKernel{info} {
   const auto& node = info.node();
-  auto opset = node.SinceVersion();
+  opset_ = node.SinceVersion();
 
   int64_t axis;
   Status status = info.GetAttr<int64_t>("axis", &axis);
@@ -90,7 +90,7 @@ Softmax::Softmax(const OpKernelInfo& info) : OpKernel{info} {
   if (status.IsOK()) {
     axis_ = gsl::narrow_cast<int>(axis);
   } else {
-    if (opset < 13) {
+    if (opset_ < 13) {
       axis_ = 1;  // opset-12 and below, the default axis value is 1
     } else {
       axis_ = -1;  // opset-13, the default axis value is -1
@@ -100,11 +100,12 @@ Softmax::Softmax(const OpKernelInfo& info) : OpKernel{info} {
   // we have check it in GetCapability
   auto input_defs = node.InputDefs();
   const auto& x_shape = input_defs[0]->Shape();
-  if (x_shape->dim_size() == 0) {
+  size_t rank = x_shape->dim_size();
+  if (rank == 0) {
     return;
   }
   if (axis_ < 0) {
-    axis_ = static_cast<int>(HandleNegativeAxis(axis_, x_shape->dim_size()));
+    axis_ = static_cast<int>(HandleNegativeAxis(axis_, int64_t(rank)));
   }
 
   int kernel_dtype = 0;
@@ -116,6 +117,12 @@ Softmax::Softmax(const OpKernelInfo& info) : OpKernel{info} {
   }
 
   uint32_t channels = gsl::narrow_cast<uint32_t>(x_shape->dim(axis_).dim_value());
+  if (opset_ < 13) {
+    for (int i = axis_ + 1; i < rank; i++) {
+      channels *= gsl::narrow_cast<uint32_t>(x_shape->dim(i).dim_value());
+    }
+  }
+
   xnn_status xstatus;
   struct xnn_operator* p;
   if (op_type_ == OpComputeType::op_compute_type_qu8) {
@@ -155,7 +162,6 @@ Status Softmax::Compute(OpKernelContext* ctx) const {
   if (X_shape.Size() == 0) {
     return Status::OK();
   }
-
   const size_t N = X_shape.SizeToDimension(axis_);
   // const size_t D = X_shape.SizeFromDimension(axis_); // the step D is 1
   xnn_status status = xnn_status_invalid_state;

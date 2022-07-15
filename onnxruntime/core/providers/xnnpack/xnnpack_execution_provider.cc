@@ -121,16 +121,50 @@ void XnnpackExecutionProvider::RegisterAllocator(AllocatorManager& allocator_man
   }
 }
 
+void AddComputeCapabilityForNodeUnit(const NodeUnit& node_unit,
+                                     const std::function<void(std::unique_ptr<IndexedSubGraph>)>& adder,
+                                     std::unordered_map<const Node*, const NodeUnit*>& supported_map) {
+  std::unique_ptr<IndexedSubGraph> sub_graph = std::make_unique<IndexedSubGraph>();
+  auto process_node = [&sub_graph, &supported_map, &node_unit](const Node& node) {
+    sub_graph->nodes.push_back(node.Index());
+    supported_map.emplace(&node, &node_unit);
+  };
+
+  if (node_unit.UnitType() == NodeUnit::Type::QDQGroup) {
+    for (const auto* node_i : node_unit.GetAllNodesInGroup()) {
+      process_node(*node_i);
+    }
+    sub_graph->SetMetaDef(FuseQDQGroup(node_unit));
+    sub_graph->use_existing_schema = true;
+  } else {
+    process_node(node_unit.GetNode());
+  }
+  adder(std::move(sub_graph));
+}
+
+void AddComputeCapabilitiesForNodesInNodeUnit(const NodeUnit& node_unit,
+                                              std::function<void(std::unique_ptr<IndexedSubGraph>)> adder,
+                                              std::unordered_map<const Node*, const NodeUnit*>& supported_map) {
+  auto process_node = [&adder, &node_unit, &supported_map](const Node& node) {
+    std::unique_ptr<IndexedSubGraph> sub_graph = std::make_unique<IndexedSubGraph>();
+    sub_graph->nodes.push_back(node.Index());
+    adder(std::move(sub_graph));
+    supported_map.emplace(&node, &node_unit);
+  };
+  for (const auto* node_i : node_unit.GetAllNodesInGroup()) {
+    process_node(*node_i);
+  }
+}
+
 std::vector<std::unique_ptr<ComputeCapability>> XnnpackExecutionProvider::GetCapability(
     const onnxruntime::GraphViewer& graph,
     const std::vector<const KernelRegistry*>& /*kernel_registries*/) const {
   std::vector<std::unique_ptr<ComputeCapability>> capabilities;
 
   std::shared_ptr<KernelRegistry> registry = GetKernelRegistry();
-  std::unordered_set<const Node*> supported_nodes;
-  NodeSupportChecker checker{graph, supported_nodes};
-
-  std::unordered_map<const Node*, ComputeCapability*> node_to_compute_capability;
+  std::unordered_map<const Node*, const NodeUnit*> supported_node_unit_map;
+  NodeSupportChecker checker{graph, supported_node_unit_map};
+  std::unordered_map<const NodeUnit*, ComputeCapability*> node_to_compute_capability;
 
   // Get all the NodeUnits in the GraphViewer so we can check if something is in a QDQ node group
   std::vector<std::unique_ptr<NodeUnit>> node_unit_holder;
@@ -138,10 +172,9 @@ std::vector<std::unique_ptr<ComputeCapability>> XnnpackExecutionProvider::GetCap
   std::tie(node_unit_holder, node_unit_map) = GetAllNodeUnits(graph);
 
   // This holds the result of whether a NodeUnit is supported or not,
-  // to prevent nodes in a NodeUnit to be checked for multiple times
+  // to prevent nodes in a NodeUnit being checked for multiple times
   std::unordered_map<const NodeUnit*, bool> node_unit_supported_result;
   node_unit_supported_result.reserve(node_unit_holder.size());
-  std::unordered_set<NodeIndex> nodeIndex_map;
   for (NodeIndex idx : graph.GetNodesInTopologicalOrder()) {
     const Node* n = graph.GetNode(idx);
     if (n == nullptr) {
@@ -160,19 +193,18 @@ std::vector<std::unique_ptr<ComputeCapability>> XnnpackExecutionProvider::GetCap
       // check if this is an ONNX operator that we have an NHWC xnnpack kernel for.
       if (checker.IsNodeSupported(node_unit)) {
         request_node = true;
-        // we need to support quantizedOp fusion
-      } else if (node_unit.UnitType() != NodeUnit::Type::QDQGroup) {
+      } else {
         // see if it's an activation we can fuse with a node we support. note that we can only do this after
         // the layout transform as we need to fuse with the NWHC op that we have the real kernel for.
-        const Node* fuse_with = checker.IsNodeSupportedWithFusion(node);
+        const NodeUnit* fuse_with = checker.IsNodeSupportedWithFusion(node_unit);
         if (fuse_with) {
           // add new MetaDef to existing ComputeCapability.
-          // we know an entry must exist in node_to_compute_capability as we update supported_nodes
+          // we know an entry must exist in node_to_compute_capability as we update supported_node_unit_map
           // when creating the ComputeCapability, and the logic in IsNodeSupportedWithFusion
-          // checks the fuse_with node is in supported_nodes.
+          // checks the fuse_with node is in supported_node_unit_map.
           auto iter = node_to_compute_capability.find(fuse_with);
           ORT_ENFORCE(iter != node_to_compute_capability.cend(),
-                      "node_to_compute_capability is not in sync with supported_nodes.");
+                      "node_to_compute_capability is not in sync with supported_node_unit_map.");
 
           // update the MetaDef to cover the nodes being fused.
           // the fused node will have OpType:'Conv' and Domain:kMSInternalNHWCDomain.
@@ -188,52 +220,25 @@ std::vector<std::unique_ptr<ComputeCapability>> XnnpackExecutionProvider::GetCap
       // second call to GetCapability after layout changes.
       // as we requested the node in the first call, it should be supported in the second call.
       request_node = true;
-      // we will create a quantized Op to replace QDQGroup in the second call, then we can fuse it with activation after
-      if (node_unit.UnitType() == NodeUnit::Type::QDQGroup) {
-        // create a ComputeCapability for the QDQGroup node.
-        std::unique_ptr<IndexedSubGraph> sub_graph = std::make_unique<IndexedSubGraph>();
-        for (const auto& node_i : node_unit.GetDQNodes()) {
-          sub_graph->nodes.push_back(node_i->Index());
-        }
-        sub_graph->nodes.push_back(node_unit.Index());
-        for (const auto& node_o : node_unit.GetQNodes()) {
-          sub_graph->nodes.push_back(node_o->Index());
-        }
-        sub_graph->SetMetaDef(FuseQDQGroup(node_unit));
-        sub_graph->use_existing_schema = true;
-        capabilities.push_back(std::make_unique<ComputeCapability>(std::move(sub_graph)));
-        node_to_compute_capability.insert({&node_unit.GetNode(), capabilities.back().get()});
-
-        supported_nodes.insert(&node_unit.GetNode());
-        node_unit_supported_result[&node_unit] = request_node;
-        continue;
-      }
     } else {
       // node belongs to another EP
       continue;
     }
     node_unit_supported_result[&node_unit] = request_node;
     if (request_node) {
-      // for a QDQgroup, we will request its DQ/target/Q nodes.
-      // for SingleNode single node, its DQ/Q will be empty
-      auto request_single_node = [&](const Node& inode) {
-        // create a ComputeCapability for the individual node.
-        std::unique_ptr<IndexedSubGraph> sub_graph = std::make_unique<IndexedSubGraph>();
-        sub_graph->nodes.push_back(inode.Index());
+      // Create ComputeCapability from IndexedSubGraph and add
+      auto add_capability = [&](std::unique_ptr<IndexedSubGraph> sub_graph) {
         capabilities.push_back(std::make_unique<ComputeCapability>(std::move(sub_graph)));
-
-        node_to_compute_capability.insert({&node, capabilities.back().get()});
-        supported_nodes.insert(&node);
+        node_to_compute_capability.insert({&node_unit, capabilities.back().get()});
       };
-      // T. we assume all the inputs are either DQnodes or constant initializer.
-      for (auto dq_node : node_unit.GetDQNodes()) {
-        request_single_node(*dq_node);
-      }
-      request_single_node(node_unit.GetNode());
-      for (auto q_node : node_unit.GetQNodes()) {
-        if (q_node->Index() != node_unit.Index()) {
-          request_single_node(*q_node);
-        }
+
+      // first pass: add ComputeCapability for all individual nodes in NodeUnit
+      if (node_unit.GetNode().GetExecutionProviderType().empty()) {
+        AddComputeCapabilitiesForNodesInNodeUnit(node_unit, add_capability, supported_node_unit_map);
+      } else {  // == Type()
+        // second pass: add single ComputeCapability for all nodes in NodeUnit so any QDQ node groups get fused
+        // Activation fusion happens later
+        AddComputeCapabilityForNodeUnit(node_unit, add_capability, supported_node_unit_map);
       }
     }
   }

@@ -12,6 +12,12 @@
 
 namespace onnxruntime {
 namespace xnnpack {
+namespace {
+bool IsQuantizedMaxPool(QuantizedOpType quant_op_type) {
+  return (quant_op_type == QuantizedOpType::QLinearMaxPool) ||
+         (quant_op_type == QuantizedOpType::QDQMaxPool);
+}
+}
 
 // MaxPool doesn't have any quantization params
 bool MaxPool::IsMaxPoolOnnxNodeSupported(const onnxruntime::NodeUnit& node_unit,

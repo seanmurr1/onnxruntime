@@ -40,7 +40,6 @@ bool GetType(const NodeArg& node_arg, int32_t& type) {
   type = ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED;
   const auto* type_proto = node_arg.TypeAsProto();
   if (!type_proto || !type_proto->has_tensor_type() || !type_proto->tensor_type().has_elem_type()) {
-    LOGS_DEFAULT(WARNING) << "NodeArg [" << node_arg.Name() << "] has no input type";
     return false;
   }
 
@@ -48,18 +47,17 @@ bool GetType(const NodeArg& node_arg, int32_t& type) {
   return true;
 }
 
-bool GetShape(const NodeArg& node_arg, Shape& shape) {
+bool GetShape(const NodeArg& node_arg, TensorShapeVector& shape) {
   shape.clear();
   const auto* shape_proto = node_arg.Shape();
 
   if (!shape_proto) {
-    LOGS_DEFAULT(WARNING) << "NodeArg [" << node_arg.Name() << "] has no shape info";
     return false;
   }
 
-  // uses 0 for dynamic dimension, which is the default value for dim.dim_value()
-  for (const auto& dim : shape_proto->dim())
-    shape.push_back(SafeInt<uint32_t>(dim.dim_value()));
+  for (const auto& dim : shape_proto->dim()) {
+    shape.push_back(dim.dim_value());
+  }
 
   return true;
 }
@@ -89,7 +87,7 @@ bool IsPaddingTypeSupported(AutoPadType auto_pad) {
 
 typedef std::string ONNXOpType;
 
-static std::unordered_map<QuantizedOpType, ONNXOpType> qdq_to_onnx_type_map = {
+static const std::unordered_map<QuantizedOpType, ONNXOpType> qdq_to_onnx_type_map = {
     {QuantizedOpType::QDQConv, "QLinearConv"},
     {QuantizedOpType::QDQAvgPool, "QLinearAveragePool"},
     {QuantizedOpType::QDQSoftmax, "QLinearSoftmax"},
@@ -101,14 +99,10 @@ std::unique_ptr<IndexedSubGraph::MetaDef> FuseQDQGroup(const NodeUnit& node_unit
   // create a ComputeCapability for QDQ node.
   std::unique_ptr<IndexedSubGraph::MetaDef> metadef = std::make_unique<IndexedSubGraph::MetaDef>();
   IndexedSubGraph::MetaDef& def = *metadef;
-  // It shouldn't happen if this node_unit passed the check function for each op
-  if (qdq_to_onnx_type_map.count(qtype) == 0) {
-    return {};
-  }
-
+  ORT_ENFORCE(qdq_to_onnx_type_map.count(qtype), "error quantized op to be fused, op name is ", node_unit.Name());
   // inputs
   const auto& inputs = node_unit.Inputs();
-  def.name = qdq_to_onnx_type_map[qtype];
+  def.name = qdq_to_onnx_type_map.at(qtype);
   // registration
   def.domain = kMSInternalNHWCDomain;  // should always be kMSInternalNHWCDomain
   def.since_version = node_unit.GetNode().SinceVersion();
@@ -166,25 +160,24 @@ std::unique_ptr<IndexedSubGraph::MetaDef> FuseQDQGroup(const NodeUnit& node_unit
   return metadef;
 }
 
-// Fuse activation with node. Currently Conv and MaxPool are supported.
-std::unique_ptr<IndexedSubGraph::MetaDef> FuseActivation(const Node& node, const Node& activation,
+// Fuse activation with node_unit.
+std::unique_ptr<IndexedSubGraph::MetaDef> FuseActivation(const NodeUnit& node_unit, const Node& activation,
                                                          const GraphViewer& graph) {
   std::unique_ptr<IndexedSubGraph::MetaDef> metadef = std::make_unique<IndexedSubGraph::MetaDef>();
   IndexedSubGraph::MetaDef& def = *metadef;
 
   // we use the op type/domain to match the static xnnpack Conv or MaxPool kernel
   // registration
-  def.name = node.OpType();
-  def.domain = node.Domain();  // should always be kMSInternalNHWCDomain
-  def.since_version = node.SinceVersion();
+  def.name = node_unit.OpType();
+  def.domain = node_unit.Domain();  // should always be kMSInternalNHWCDomain
+  def.since_version = node_unit.SinceVersion();
 
   // inputs
-  const auto& inputs = node.InputDefs();
+  const auto& inputs = node_unit.Inputs();
   def.inputs.reserve(inputs.size());
   std::for_each(inputs.cbegin(), inputs.cend(),
-                [&def](const NodeArg* arg) {
-                  // keep the number of inputs the same by inserting an empty string for a missing optional input
-                  def.inputs.push_back(arg ? arg->Name() : "");
+                [&def](const NodeUnitIODef& iodef) {
+                  def.inputs.push_back(iodef.node_arg.Name());
                 });
 
   // outputs
@@ -192,7 +185,7 @@ std::unique_ptr<IndexedSubGraph::MetaDef> FuseActivation(const Node& node, const
 
   // attributes
   // copy existing and add the activation info
-  def.attributes = node.GetAttributes();
+  def.attributes = node_unit.GetNode().GetAttributes();
 
   // use infinity as the default as that's what xnnpack uses if min/max are not set
   float min = -INFINITY;
@@ -235,7 +228,7 @@ std::unique_ptr<IndexedSubGraph::MetaDef> FuseActivation(const Node& node, const
   } else if (activation_type == "Relu") {
     min = 0.f;
   } else {
-    ORT_NOT_IMPLEMENTED("No support for fusion of ", node.OpType(), " with ", activation_type);
+    ORT_NOT_IMPLEMENTED("No support for fusion of ", node_unit.OpType(), " with ", activation_type);
   }
 
   InlinedVector<float> activation_params{min, max};
@@ -243,25 +236,6 @@ std::unique_ptr<IndexedSubGraph::MetaDef> FuseActivation(const Node& node, const
   def.attributes.insert({"activation_params", utils::MakeAttribute("activation_params", activation_params)});
 
   return metadef;
-}
-
-bool IsQuantizedConv(QuantizedOpType quant_op_type) {
-  return (quant_op_type == QuantizedOpType::QLinearConv) ||
-         (quant_op_type == QuantizedOpType::QDQConv);
-}
-
-bool IsQuantizedMaxPool(QuantizedOpType quant_op_type) {
-  return (quant_op_type == QuantizedOpType::QLinearMaxPool) ||
-         (quant_op_type == QuantizedOpType::QDQMaxPool);
-}
-
-bool IsQuantizedAvgPool(QuantizedOpType quant_op_type) {
-  return (quant_op_type == QuantizedOpType::QlinearAvgPool) ||
-         (quant_op_type == QuantizedOpType::QDQAvgPool);
-}
-
-bool IsQuantizedSoftmax(QuantizedOpType quant_op_type) {
-  return (quant_op_type == QuantizedOpType::QDQSoftmax);
 }
 
 const onnx::TensorProto* GetQuantizationScale(const InitializedTensorSet& initializers,
@@ -292,7 +266,7 @@ const onnx::TensorProto* GetQuantizationZeroPoint(const InitializedTensorSet& in
   return initializers.at(zero_point_name);
 }
 
-// XNNPACK defined a few dtypes for quantized tensor, hence we can easily check if XNNPACK support it
+// we have uint8,int8 and int8_per-channel
 TensorQuantType GetTensorQuantType(const onnxruntime::NodeUnit& node_unit, int32_t io_index,
                                    bool is_output, const onnxruntime::GraphViewer& graph_viewer) {
   // we do not check the legality of io_index here
@@ -315,7 +289,7 @@ TensorQuantType GetTensorQuantType(const onnxruntime::NodeUnit& node_unit, int32
   int64_t zero_dim = !zero_tensor ? 0 : (zero_tensor->dims().empty() ? 1 : zero_tensor->dims()[0]);
   const auto& quantization_params = iodef.quant_param.value();
 
-  Shape tensor_shape;
+  TensorShapeVector tensor_shape;
   if (!GetShape(iodef.node_arg, tensor_shape)) {
     return datatype;
   }
@@ -336,7 +310,7 @@ TensorQuantType GetTensorQuantType(const onnxruntime::NodeUnit& node_unit, int32
       datatype = TensorTypeUint8;
       break;
     case ONNX_NAMESPACE::TensorProto_DataType_INT8:
-      // symmetry conv? when zero_dim == 0
+      // symmetry quantization when zero_dim == 0
       if (scales_dim != zero_dim && zero_dim != 0) {
         LOGS_DEFAULT(VERBOSE) << "mismatching number of scale " << scales_dim
                               << " and zero-point " << zero_dim << " quantization parameters for INT8";
@@ -358,7 +332,7 @@ TensorQuantType GetTensorQuantType(const onnxruntime::NodeUnit& node_unit, int32
           const int8_t* zero_points = reinterpret_cast<const int8_t*>(unpacked_tensor.data());
           for (size_t i = 0; i < unpacked_tensor.size(); i++) {
             if (zero_points[i] != 0) {
-              LOGS_DEFAULT(VERBOSE) << "only support 0 as zero point, "
+              LOGS_DEFAULT(VERBOSE) << "only support 0 as zero point for per-channel quantization, "
                                     << "zero_points[" << i << "] has value: " << zero_points[i];
               break;
             }
@@ -384,7 +358,7 @@ TensorQuantType GetTensorQuantType(const onnxruntime::NodeUnit& node_unit, int32
 bool ParseQuantParamFromInfoByOrder(const OpKernelInfo& info,
                                     const InputTensorOrder& scale_zp_indexs,
                                     QuantParam& quant_param) {
-  // quant param, which used in create xnnpack_conv_kernel
+  // quant param, which used in create xnnpack_kernel
   // we do not check the error here, as we have done it in op_checker
   // if this input tensor is not exists, its value is -1;
   if (scale_zp_indexs.X_ZERO_POINT >= 0) {
